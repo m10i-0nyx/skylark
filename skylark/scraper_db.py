@@ -489,22 +489,22 @@ class SkylarkScraperDb:
                     earning_money = 0
 
                 dataset_horse.append({
-                    "horse_id":horse_id,
+                    "id":horse_id,
                     "horse_name":horse_name
                 })
 
                 dataset_jockey.append({
-                    "jockey_id":jockey_id,
+                    "id":jockey_id,
                     "jockey_name":jockey_name
                 })
 
                 dataset_trainer.append({
-                    "trainer_id":trainer_id,
+                    "id":trainer_id,
                     "trainer_name":trainer_name
                 })
 
                 dataset_owner.append({
-                    "owner_id":owner_id,
+                    "id":owner_id,
                     "owner_name":owner_name
                 })
 
