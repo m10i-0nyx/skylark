@@ -1,6 +1,3 @@
-#!/usr/bin/env python3.12
-# -*- coding: utf-8 -*-
-
 #
 # Copyright (c) MINETA "m10i" Hiroki <h-mineta@0nyx.net>
 # This software is released under the MIT License.
@@ -13,7 +10,6 @@ from playwright.sync_api import sync_playwright
 import datetime
 import re
 import streamlit as st
-from typing import List, Dict
 
 from skylark.crud import SkylarkCrud
 from skylark.util import SkylarkUtil
@@ -57,7 +53,7 @@ def fetch_race_dates(today) -> list:
             if date_text and href:
                 kaisai_date: datetime.date | None = extract_kaisai_date_from_url(href)
                 if kaisai_date and kaisai_date < today:
-                    # 開催日が今日以降のもののみを対象とする
+                    # 開催日が今日以降のみを対象とする
                     continue
                 date_buttons.append({"text": date_text, "href": href, "kaisai_date": kaisai_date})
         browser.close()
@@ -87,24 +83,21 @@ def fetch_race_list_for_date(link: str) -> list:
                 # レース詳細ページへのリンク
                 a_tag = li.query_selector("a")
                 href = a_tag.get_attribute("href") if a_tag else None
+                race_id = extract_race_id_from_url(href) if href else None
                 if race_name and href and "/race/" in href:
                     race_list.append({
                         "course_name": course_name,
                         "race_number": race_number,
                         "race_name": race_name,
                         "text": f"{course_name} - {race_number:3s} - {race_name}",
-                        "href": href
+                        "href": href,
+                        "race_id": race_id
                     })
         browser.close()
         return race_list
 
-def fetch_race_information(link: str) -> tuple[dict, dict]:
-    if link.startswith("http"):
-        url = link
-    else:
-        url = "https://race.netkeiba.com" + link.lstrip(".")
-
-    race_id = extract_race_id_from_url(url)
+def fetch_race_information(race_id: int) -> tuple[dict, dict]:
+    url = "https://race.netkeiba.com/race/shutuba.html?race_id=" + str(race_id)
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
@@ -181,14 +174,22 @@ def fetch_race_information(link: str) -> tuple[dict, dict]:
         horse_trs = page.query_selector_all("table.Shutuba_Table tbody tr.HorseList")
 
         for horse in horse_trs:
+            horse_elem = horse.query_selector_all("td")
+            if len(horse_elem) < 14:
+                continue  # 不正な行はスキップ
 
-            horse_number_elem = horse.query_selector("td.Umaban1")
-            horse_number = int(horse_number_elem.inner_text().strip()) if horse_number_elem else None
-
-            waku_number_elem = horse.query_selector("td.Waku1")
+            # 馬番情報は 0 番目
+            waku_number_elem = horse_elem[0]
             waku_number = int(waku_number_elem.inner_text().strip()) if waku_number_elem else None
 
-            horse_name_elem = horse.query_selector("span.HorseName > a")
+            # 馬番情報は 1 番目
+            horse_number_elem = horse_elem[1]
+            horse_number = int(horse_number_elem.inner_text().strip()) if horse_number_elem else None
+
+            # 2 は 印のため pass
+
+            # 馬名情報は 3 番目
+            horse_name_elem = horse_elem[3].query_selector("a")
             horse_id = None
             horse_db_url = horse_name_elem.get_attribute("href") if horse_name_elem else None
             matches = re.search(r"/(\d+)$", horse_db_url) if horse_db_url else None
@@ -196,7 +197,18 @@ def fetch_race_information(link: str) -> tuple[dict, dict]:
                 horse_id = int(matches.group(1))
             horse_name = horse_name_elem.inner_text().strip() if horse_name_elem else None
 
-            jockey_name_elem = horse.query_selector("td.Jockey > a")
+            # 馬齢情報は 4 番目
+            barei_elem = horse_elem[4]
+            barei = barei_elem.inner_text().strip() if barei_elem else None
+
+            # 斤量情報は 5 番目
+            basis_weight_elem = horse_elem[5] # 斤量
+            basis_weight = None
+            if basis_weight_elem and basis_weight_elem.inner_text() == "未定":
+                basis_weight = float(basis_weight_elem.inner_text().strip()) if basis_weight_elem else None
+
+            # 騎手情報は 6 番目
+            jockey_name_elem = horse_elem[6].query_selector("a")
             jockey_id = None
             jockey_db_url = jockey_name_elem.get_attribute("href") if jockey_name_elem else None
             matches = re.search(r"/(\d+)/$", jockey_db_url) if jockey_db_url else None
@@ -204,24 +216,17 @@ def fetch_race_information(link: str) -> tuple[dict, dict]:
                 jockey_id = int(matches.group(1))
             jockey_name = jockey_name_elem.inner_text().strip() if jockey_name_elem else None
 
-            barei_elem = horse.query_selector("td.Waku1")
-            barei = barei_elem.inner_text().strip() if barei_elem else None
-
-            barei_elem = horse.query_selector("td.Waku1")
-            barei = barei_elem.inner_text().strip() if barei_elem else None
-
-            basis_weight_elem = horse.query_selector("td.Txt_C") # 斤量 
-            basis_weight = float(basis_weight_elem.inner_text().strip()) if basis_weight_elem else None
-
-            trainer_name_elem = horse.query_selector("td.Trainer > a")
+            # 調教師情報は 7 番目
+            trainer_name_elem = horse_elem[7].query_selector("a")
             trainer_id = None
             trainer_db_url = trainer_name_elem.get_attribute("href") if trainer_name_elem else None
             matches = re.search(r"/(\d+)/$", trainer_db_url) if trainer_db_url else None
             if matches:
                 trainer_id = int(matches.group(1))
             trainer_name = trainer_name_elem.inner_text().strip() if trainer_name_elem else None
-            
-            horse_weight_elem = horse.query_selector("td.Txt_C")
+
+            # 馬体重と増減は 8 番目
+            horse_weight_elem = horse_elem[8]
             horse_weight: int = 999
             horse_weight_diff: int = 0
             matches = re.match(r"(\d+)\(([+-]?\d+)\)", horse_weight_elem.inner_text()) if horse_weight_elem else None
@@ -229,10 +234,12 @@ def fetch_race_information(link: str) -> tuple[dict, dict]:
                 horse_weight = int(matches.group(1))
                 horse_weight_diff = int(matches.group(2))
 
-            odds_elem = horse.query_selector("td.Txt_R > span")
+            # オッズは 9 番目
+            odds_elem = horse_elem[9].query_selector("span")
             odds = float(odds_elem.inner_text().strip()) if odds_elem else None
 
-            popularity_elem = horse.query_selector("td.Popular > span")
+            # 人気は 10 番目
+            popularity_elem = horse_elem[10].query_selector("span")
             popularity = float(popularity_elem.inner_text().strip()) if popularity_elem else None
 
             horses_dict[horse_number] = {
@@ -305,7 +312,7 @@ def main():
             st.subheader(f"レース情報: {selected_race['text']}")
             if f"race_information_{date_idx}_{race_idx}" not in st.session_state:
                 with st.spinner("レース情報を取得中..."):
-                    st.session_state[f"race_information_{date_idx}_{race_idx}"] = fetch_race_information(selected_race["href"])
+                    st.session_state[f"race_information_{date_idx}_{race_idx}"] = fetch_race_information(selected_race["race_id"])
             race_info_dict, horses_dict = st.session_state[f"race_information_{date_idx}_{race_idx}"]
             if race_info_dict:
                 race_info_dict["date"] = kaisai_date
