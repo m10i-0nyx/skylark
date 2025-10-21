@@ -6,6 +6,7 @@
 import logging
 import os
 from dotenv import load_dotenv
+import pandas as pd
 from playwright.sync_api import sync_playwright
 import datetime
 import re
@@ -338,6 +339,14 @@ def main():
                 }
                 st.table(table_data)
 
+                # 馬情報を表形式で表示
+                st.subheader("出走馬情報")
+                try:
+                    horses_list = list(horses_dict.values())
+                    st.table(pd.DataFrame(horses_list))
+                except Exception:
+                    pass
+
                 # ボタンの状態管理用キー
                 button_key = f"race_info_saved_{date_idx}_{race_idx}"
 
@@ -347,8 +356,7 @@ def main():
                 def save_race_info():
                     db_crud: SkylarkCrud = SkylarkCrud(DATABASE_URL, logger=LOGGER)
                     db_crud.upsert_race_info(race_info_dict)
-                    print(horses_dict)
-                    #st.session_state[button_key] = True
+                    st.session_state[button_key] = True
 
                 st.button(
                     "レース情報をDB保管",

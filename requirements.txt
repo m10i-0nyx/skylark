@@ -1,5 +1,6 @@
 PyMySQL
 httpx[http2]
+pandas
 playwright
 pyquery
 python-dotenv
