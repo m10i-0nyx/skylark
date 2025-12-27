@@ -9,6 +9,7 @@ class SkylarkUtil:
     ticket_type_list = (
         "単勝",
         "複勝",
+        "枠単",
         "枠連",
         "馬連",
         "ワイド",
@@ -27,15 +28,23 @@ class SkylarkUtil:
     )
 
     @staticmethod
-    def convertToTicketType2Int(strings):
-        return SkylarkUtil.ticket_type_list.index(strings)
+    def convertToTicketType2Int(key: str|None) -> int|None:
+        if key is None or key == "":
+            return None
+        try:
+            return SkylarkUtil.ticket_type_list.index(key)
+        except ValueError:
+            return None
 
     @staticmethod
-    def convertToClass2Int(strings):
+    def convertToClass2Int(key: str|None) -> int|None:
         count = 0
+        if key is None or key == "":
+            return None
+
         for value in SkylarkUtil.class_list:
-            if strings.find(value) > 0:
+            if key.find(value) > 0:
                 return count
             count += 1
 
-        return count  # 未分類は最後の値を返す
+        return None

@@ -20,7 +20,7 @@ class RaceInfo(Base):
     race_name = Column(String(256), nullable=False)
     date = Column(Date, nullable=False)
     post_time = Column(Time, nullable=True)
-    distance = Column(Integer, nullable=False)
+    distance = Column(Integer, nullable=True)
     weather = Column(String(8), nullable=True)
     race_number = Column(BigInteger, nullable=False)
     run_direction = Column(String(8))
@@ -28,8 +28,8 @@ class RaceInfo(Base):
     track_condition = Column(String(8), nullable=True)
     track_condition_score = Column(Integer, nullable=True)
     place_detail = Column(String(16), nullable=False)
-    race_grade = Column(Integer)
-    race_class = Column(String(64), nullable=False)
+    race_grade = Column(Integer, nullable=True)
+    race_class = Column(String(64), nullable=True)
 
     # インデックス
     __table_args__ = (
@@ -44,12 +44,12 @@ class Horse(Base):
 
 class Jockey(Base):
     __tablename__ = 'jockey_tbl'
-    id = Column(BigInteger, primary_key=True, autoincrement=False)
+    id = Column(String(32), primary_key=True, autoincrement=False)
     jockey_name = Column(String(256), nullable=False)
 
 class Trainer(Base):
     __tablename__ = 'trainer_tbl'
-    id = Column(BigInteger, primary_key=True, autoincrement=False)
+    id = Column(String(32), primary_key=True, autoincrement=False)
     trainer_name = Column(String(256), nullable=False)
 
 class Owner(Base):
@@ -67,7 +67,7 @@ class RaceResult(Base):
     sex = Column(String(8), nullable=False)
     age = Column(Integer, nullable=False)
     basis_weight = Column(Float, nullable=False)
-    jockey_id = Column(BigInteger, ForeignKey('jockey_tbl.id'), nullable=False)
+    jockey_id = Column(String(32), nullable=False)
     finishing_time = Column(Time)
     margin = Column(String(16), nullable=False)
     speed_figure = Column(Integer)
@@ -79,8 +79,8 @@ class RaceResult(Base):
     horse_weight_diff = Column(Integer)
     remark = Column(Text)
     stable = Column(String(8), nullable=False)
-    trainer_id = Column(BigInteger, ForeignKey('trainer_tbl.id'), nullable=False)
-    owner_id = Column(String(32), ForeignKey('owner_tbl.id'), nullable=False)
+    trainer_id = Column(String(32), nullable=False)
+    owner_id = Column(String(32), nullable=False)
     earning_money = Column(Float)
 
     # インデックス
@@ -103,6 +103,6 @@ class Feature(Base):
     __tablename__ = 'feature_tbl'
     horse_id = Column(BigInteger, ForeignKey('horse_tbl.id'), primary_key=True)
     race_id = Column(BigInteger, ForeignKey('race_info_tbl.id'), primary_key=True)
-    jockey_id = Column(BigInteger, ForeignKey('jockey_tbl.id'), nullable=False)
-    trainer_id = Column(BigInteger, ForeignKey('trainer_tbl.id'), nullable=False)
+    jockey_id = Column(String(32), nullable=False)
+    trainer_id = Column(String(32), nullable=False)
     calculation_result_json = Column(JSON, nullable=True)

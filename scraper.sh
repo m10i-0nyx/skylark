@@ -8,4 +8,4 @@ if [ -z "${VIRTUAL_ENV_PROMPT}" ]; then
     fi
 fi
 
-streamlit run webui.py
+python3 app.py $@

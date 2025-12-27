@@ -19,9 +19,16 @@ from pyquery import PyQuery as pq
 from skylark.crud import SkylarkCrud
 from skylark.util import SkylarkUtil
 
+def _write_bytes(path: str, data: bytes) -> None:
+    with open(path, "wb") as f:
+        f.write(data)
+
+def _read_bytes(path: str) -> bytes:
+    with open(path, "rb") as f:
+        return f.read()
+
 class SkylarkScraperDb:
     def __init__(self, db_url: str, args: Namespace, logger: Logger):
-        self.db_url = db_url
         self.args = args
         self.logger = logger
 
@@ -38,6 +45,8 @@ class SkylarkScraperDb:
             202204010808,
             202209040704
         ]
+
+        self.db_crud = SkylarkCrud(db_url, logger=logger)
 
     def __enter__(self):
         return self
@@ -121,15 +130,10 @@ class SkylarkScraperDb:
                             self.race_url_list.append(path)
                             self.logger.debug("path: %s, name: %s", path, doc.text())
 
-                    time.sleep(0.2) # sleep 100ms
-
             # 先月分のURLを作成
             path = dom("div#contents div.race_calendar li a").eq(1).attr("href")
             url = f"{self.url_db}{path}"
             period -= 1
-
-            # sleep 100ms
-            time.sleep(0.1)
 
     # netkeibaにログイン
     def login(self, client: httpx.Client) -> bool|None:
@@ -171,11 +175,11 @@ class SkylarkScraperDb:
 
         asyncio.run(
             self.download_concurrently(
-                max_concurrent_requests=int(os.environ.get("MAX_CONCURRENT_REQUESTS", 4))
+                max_concurrent_requests=int(os.environ.get("MAX_CONCURRENT_REQUESTS", 16))
             )
         )
 
-    async def download_concurrently(self, max_concurrent_requests=4):
+    async def download_concurrently(self, max_concurrent_requests: int=16):
         pattern = re.compile(r"^/race/([0-9]+)/$")
 
         async with httpx.AsyncClient(http2=True) as client:
@@ -211,24 +215,28 @@ class SkylarkScraperDb:
                                 html = response.text
 
                         except Exception as ex:
-                            self.logger.warning(ex)
+                            self.logger.warning(ex, exc_info=True)
+                            await asyncio.sleep(1) # sleep 1sec
                             return
 
-                        with open(filepath, 'wb') as fp:
-                            fp.write(zstd.compress(html.encode("utf-8"), 3))
-
                         self.logger.info("[%5d] race_id: %d, url: %s, download finish", idx, race_id, url)
+
+                        compressed = await asyncio.to_thread(zstd.compress, html.encode("utf-8"))
+                        await asyncio.to_thread(_write_bytes, filepath, compressed)
+
+                        await asyncio.sleep(1) # sleep 1sec
 
                     else:
                         self.logger.info("[%5d] race_id: %d, url: %s, downloaded", idx, race_id, url)
 
-                        with open(filepath, 'rb') as fp:
-                            html = zstd.decompress(fp.read()).decode("utf-8")
+                        data = await asyncio.to_thread(_read_bytes, filepath)
+                        html_bytes = await asyncio.to_thread(zstd.decompress, data)
+                        html = html_bytes.decode("utf-8", errors="replace")
 
                     if html == None:
                         self.logger.warning("[%5d] race_id: %d, url: %s, no data", idx, race_id, url)
                     else:
-                        self.scraping_html(race_id, html)
+                        await asyncio.to_thread(self.scraping_html, race_id, html)
 
                     self.logger.debug("[%5d] url: %s, done", idx, url)
 
@@ -245,8 +253,8 @@ class SkylarkScraperDb:
             results = await asyncio.gather(*tasks)
             return results
 
-    def scraping_html(self, race_id, html):
-        db_crud: SkylarkCrud = SkylarkCrud(self.db_url, logger = self.logger)
+    def scraping_html(self, race_id: int, html: str) -> None:
+        db_crud: SkylarkCrud = self.db_crud
         try:
             dataset_horse :list   = []
             dataset_jockey :list  = []
@@ -271,7 +279,7 @@ class SkylarkScraperDb:
             data_run_direction = None
             data_track_surface_org = None
             data_place_detail = None
-            data_class = None
+            data_race_class = None
             data_date = None
 
             data_race_number_text = str(race_head("dl.racedata dt").text())
@@ -320,12 +328,12 @@ class SkylarkScraperDb:
                 data_post_time = matchese.group(5)
 
             # date, place_detail, class
-            text_value = str(race_head("div.mainrace_data p").eq(1).text())
-            matchese = re.match(r'^(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日\s*([^ ]+)\s+(.+)', text_value)
+            text_value = str(race_head("div.mainrace_data p").eq(1).text()).replace('\u00A0', ' ').strip()
+            matchese = re.match(r'^(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日\s*(\S+?)(?:\s+(.+))?$', text_value)
             if matchese:
                 data_date = matchese.group(1) + "-" + matchese.group(2) + "-" + matchese.group(3)
                 data_place_detail = matchese.group(4)
-                data_class = matchese.group(5)
+                data_race_class = matchese.group(5)
 
             race_head = None
 
@@ -342,11 +350,11 @@ class SkylarkScraperDb:
                 "track_condition_score":data_track_condition_score,
                 "date":data_date,
                 "place_detail":data_place_detail,
-                "race_grade":SkylarkUtil.convertToClass2Int(data_class),
-                "race_class":data_class
+                "race_grade":SkylarkUtil.convertToClass2Int(data_race_class),
+                "race_class":data_race_class
             }
 
-            db_crud.upsert_race_info(dataset_info)
+            db_crud.insert_race_info(dataset_info)
 
             race_result = dom("html body div#page div#contents_liquid table tr")
             for result_row in race_result[1:]:
@@ -398,10 +406,6 @@ class SkylarkScraperDb:
 
                 #騎手
                 jockey_id = str(columns.eq(6).find("a").eq(0).attr("href")).rsplit("/", 2)[1]
-                try:
-                    jockey_id = int(jockey_id)
-                except ValueError as ex:
-                    self.logger.warning(ex)
                 jockey_name = columns.eq(6).find("a").eq(0).text()
 
                 #タイム
@@ -470,10 +474,6 @@ class SkylarkScraperDb:
 
                 #調教師
                 trainer_id = str(columns.eq(18).find("a").eq(0).attr("href")).rsplit("/", 2)[1]
-                try:
-                    trainer_id = int(trainer_id)
-                except ValueError as ex:
-                    self.logger.warning(ex)
                 trainer_name = columns.eq(18).find("a").eq(0).text()
 
                 #馬主
@@ -535,16 +535,19 @@ class SkylarkScraperDb:
                 })
 
             race_result = None
-            db_crud.upsert_horses(dataset_horse)
-            db_crud.upsert_jockeys(dataset_jockey)
-            db_crud.upsert_trainers(dataset_trainer)
-            db_crud.upsert_owners(dataset_owner)
-            db_crud.upsert_race_results(dataset_result)
+            db_crud.insert_horses(dataset_horse)
+            db_crud.insert_jockeys(dataset_jockey)
+            db_crud.insert_trainers(dataset_trainer)
+            db_crud.insert_owners(dataset_owner)
+            db_crud.insert_race_results(dataset_result)
 
             pay_block = dom("html body div#page div#contents dl.pay_block tr")
             for pay_result in pay_block:
                 columns = pq(pay_result).find("th")
-                ticket_type = SkylarkUtil.convertToTicketType2Int(columns.eq(0).text())
+                ticket_type = SkylarkUtil.convertToTicketType2Int(columns.eq(0).text())  # type: ignore
+                if ticket_type is None:
+                    self.logger.warning("Unknown ticket type, skip: %s", columns.eq(0).text())
+                    continue
 
                 columns = pq(pay_result).find("td")
                 horse_numbers_list = str(columns.eq(0).html()).split("<br />")
@@ -563,6 +566,6 @@ class SkylarkScraperDb:
                     idx = idx + 1
 
             pay_block = None
-            db_crud.upsert_payoffs(dataset_payoff)
+            db_crud.insert_payoffs(dataset_payoff)
         except Exception as ex:
             self.logger.error(ex)

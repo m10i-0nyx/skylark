@@ -355,7 +355,7 @@ def main():
 
                 def save_race_info():
                     db_crud: SkylarkCrud = SkylarkCrud(DATABASE_URL, logger=LOGGER)
-                    db_crud.upsert_race_info(race_info_dict)
+                    db_crud.insert_race_info(race_info_dict)
                     st.session_state[button_key] = True
 
                 st.button(

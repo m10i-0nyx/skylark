@@ -73,7 +73,7 @@ class SkylarkFeature():
             "earnings_per_share": earnings_per_share
         }
 
-        db_crud.insert_features([
+        db_crud.upsert_features([
             {
                 "horse_id": horse_id,
                 "race_id": race_id,

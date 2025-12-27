@@ -5,31 +5,53 @@
 # This software is released under the MIT License.
 #
 
+import os
 from logging import Logger
 from sqlalchemy import create_engine, desc, func
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.exc import IntegrityError
 
 from skylark.models import Base, Feature, Horse, Jockey, Trainer, Owner, RaceInfo, RaceResult, Payoff
 
 class SkylarkCrud:
+    _engines: dict = {}
+    _sessionmakers: dict = {}
+
     def __init__(self, db_url: str, logger: Logger):
-        # Create the engine and session
-        self.engine = create_engine(
-            db_url,
-            pool_size=1,
-            max_overflow=0,
-            pool_recycle=3600,
-            pool_pre_ping=True
-        )
-        self.session = sessionmaker(bind=self.engine)
-        # Set the logger
+        self.db_url = db_url
         self.logger: Logger = logger
 
+        if db_url in SkylarkCrud._sessionmakers:
+            self.engine = SkylarkCrud._engines[db_url]
+            self.session = SkylarkCrud._sessionmakers[db_url]
+            return
+
+        engine = create_engine(
+            db_url,
+            pool_size=int(os.getenv("DB_POOL_SIZE", "16")),
+            max_overflow=int(os.getenv("DB_MAX_OVERFLOW", "16")),
+            pool_recycle=int(os.getenv("DB_POOL_RECYCLE", "3600")),
+            pool_pre_ping=True,
+            pool_timeout=int(os.getenv("DB_POOL_TIMEOUT", "30"))
+        )
+        SkylarkCrud._engines[db_url] = engine
+        SkylarkCrud._sessionmakers[db_url] = sessionmaker(bind=engine)
+        self.engine = engine
+        self.session: sessionmaker = SkylarkCrud._sessionmakers[db_url]
+
     def __exit__(self, exc_type, exc_value, traceback):
-        try:
-            self.engine.dispose()
-        except Exception as ex:
-            self.logger.error(f"{ex}")
+        # do not dispose engine here to avoid tearing down shared pool
+        pass
+
+    @classmethod
+    def dispose_all_engines(cls):
+        for e in cls._engines.values():
+            try:
+                e.dispose()
+            except Exception:
+                pass
+        cls._engines.clear()
+        cls._sessionmakers.clear()
 
     def create_tables(self):
         Base.metadata.create_all(self.engine)
@@ -60,8 +82,7 @@ class SkylarkCrud:
     def get_horse(self, horse_id) -> Horse|None:
         with self.session() as session:
             try:
-                horse = session.query(Horse).filter_by(id=horse_id).first()
-                return horse
+                return session.query(Horse).filter_by(id=horse_id).one_or_none()
             except Exception as ex:
                 self.logger.error(f"{ex}")
         return None
@@ -77,13 +98,29 @@ class SkylarkCrud:
                 self.logger.error(ex)
         return None
 
-    def upsert_horses(self, dataset_list: list):
+    def insert_horses(self, dataset_list: list):
         with self.session() as session:
             try:
                 for dataset in dataset_list:
+                    if session.get(Horse, dataset["id"]) is not None:
+                        continue
+
                     horse = Horse(**dataset)
-                    session.merge(horse)
+                    session.add(horse)
                 session.commit()
+
+            except IntegrityError as ex:
+                session.rollback()
+
+                orig = getattr(ex, "orig", None)
+                if orig is not None:
+                    args = getattr(orig, "args", ())
+                    if len(args) >= 1 and args[0] == 1062:
+                        msg = args[1] if len(args) >= 2 else str(orig)
+                        self.logger.info("Duplicate ignored in horse: %s", msg)
+                        return
+                raise ex
+
             except Exception as ex:
                 session.rollback()
                 raise ex
@@ -91,8 +128,7 @@ class SkylarkCrud:
     def get_jockey(self, jockey_id) -> Jockey|None:
         with self.session() as session:
             try:
-                jockey = session.query(Jockey).filter_by(id=jockey_id).first()
-                return jockey
+                return session.query(Jockey).filter_by(id=jockey_id).one_or_none()
             except Exception as ex:
                 self.logger.error(ex)
         return None
@@ -108,13 +144,29 @@ class SkylarkCrud:
                 self.logger.error(ex)
         return None
 
-    def upsert_jockeys(self, dataset_list: list) -> None:
+    def insert_jockeys(self, dataset_list: list) -> None:
         with self.session() as session:
             try:
                 for dataset in dataset_list:
+                    if session.get(Jockey, dataset["id"]) is not None:
+                        continue
+
                     jockey = Jockey(**dataset)
-                    session.merge(jockey)
+                    session.add(jockey)
                 session.commit()
+
+            except IntegrityError as ex:
+                session.rollback()
+
+                orig = getattr(ex, "orig", None)
+                if orig is not None:
+                    args = getattr(orig, "args", ())
+                    if len(args) >= 1 and args[0] == 1062:
+                        msg = args[1] if len(args) >= 2 else str(orig)
+                        self.logger.info("Duplicate ignored in jockey: %s", msg)
+                        return
+                raise ex
+
             except Exception as ex:
                 session.rollback()
                 raise ex
@@ -122,8 +174,7 @@ class SkylarkCrud:
     def get_trainer(self, trainer_id) -> Trainer|None:
         with self.session() as session:
             try:
-                trainer = session.query(Trainer).filter_by(trainer_id=trainer_id).first()
-                return trainer
+                return session.query(Trainer).filter_by(id=trainer_id).one_or_none()
             except Exception as ex:
                 self.logger.error(ex)
         return None
@@ -139,13 +190,29 @@ class SkylarkCrud:
                 self.logger.error(ex)
         return None
 
-    def upsert_trainers(self, dataset_list: list) -> None:
+    def insert_trainers(self, dataset_list: list) -> None:
         with self.session() as session:
             try:
                 for dataset in dataset_list:
+                    if session.get(Trainer, dataset["id"]) is not None:
+                        continue
+
                     trainer = Trainer(**dataset)
-                    session.merge(trainer)
+                    session.add(trainer)
                 session.commit()
+
+            except IntegrityError as ex:
+                session.rollback()
+
+                orig = getattr(ex, "orig", None)
+                if orig is not None:
+                    args = getattr(orig, "args", ())
+                    if len(args) >= 1 and args[0] == 1062:
+                        msg = args[1] if len(args) >= 2 else str(orig)
+                        self.logger.info("Duplicate ignored in trainer: %s", msg)
+                        return
+                raise ex
+
             except Exception as ex:
                 session.rollback()
                 raise ex
@@ -153,8 +220,7 @@ class SkylarkCrud:
     def get_owner(self, owner_id) -> Owner|None:
         with self.session() as session:
             try:
-                owner = session.query(Owner).filter_by(owner_id=owner_id).first()
-                return owner
+                return session.query(Owner).filter_by(id=owner_id).one_or_none()
             except Exception as ex:
                 self.logger.error(ex)
         return None
@@ -170,13 +236,28 @@ class SkylarkCrud:
                 self.logger.error(ex)
         return None
 
-    def upsert_owners(self, dataset_list: list) -> None:
+    def insert_owners(self, dataset_list: list) -> None:
         with self.session() as session:
             try:
                 for dataset in dataset_list:
+                    if session.get(Owner, dataset["id"]) is not None:
+                        continue
+
                     owner = Owner(**dataset)
-                    session.merge(owner)
+                    session.add(owner)
                 session.commit()
+
+            except IntegrityError as ex:
+                session.rollback()
+
+                orig = getattr(ex, "orig", None)
+                if orig is not None:
+                    args = getattr(orig, "args", ())
+                    if len(args) >= 1 and args[0] == 1062:
+                        msg = args[1] if len(args) >= 2 else str(orig)
+                        self.logger.info("Duplicate ignored in owner: %s", msg)
+                        return
+
             except Exception as ex:
                 session.rollback()
                 raise ex
@@ -184,18 +265,33 @@ class SkylarkCrud:
     def get_race_info(self, race_id) -> RaceInfo|None:
         with self.session() as session:
             try:
-                race_info = session.query(RaceInfo).filter_by(id=race_id).first()
-                return race_info
+                return session.query(RaceInfo).filter_by(id=race_id).one_or_none()
             except Exception as ex:
                 self.logger.error(ex)
         return None
 
-    def upsert_race_info(self, dataset: dict) -> None:
+    def insert_race_info(self, dataset: dict) -> None:
         with self.session() as session:
             try:
+                if session.get(RaceInfo, dataset["id"]) is not None:
+                    return
+
                 race_info = RaceInfo(**dataset)
-                session.merge(race_info)
+                session.add(race_info)
                 session.commit()
+
+            except IntegrityError as ex:
+                session.rollback()
+
+                orig = getattr(ex, "orig", None)
+                if orig is not None:
+                    args = getattr(orig, "args", ())
+                    if len(args) >= 1 and args[0] == 1062:
+                        msg = args[1] if len(args) >= 2 else str(orig)
+                        self.logger.info("Duplicate ignored in race_info: %s", msg)
+                        return
+                raise ex
+
             except Exception as ex:
                 session.rollback()
                 raise ex
@@ -211,18 +307,34 @@ class SkylarkCrud:
     def get_race_result(self, race_id: int, horse_number: int) -> RaceResult|None:
         with self.session() as session:
             try:
-                return session.query(RaceResult).filter_by(race_id=race_id, horse_number=horse_number).first()
+                return session.query(RaceResult).filter_by(race_id=race_id, horse_number=horse_number).one_or_none()
             except Exception as ex:
                 self.logger.error(ex)
         return None
 
-    def upsert_race_results(self, dataset_list: list):
+    def insert_race_results(self, dataset_list: list):
         with self.session() as session:
             try:
                 for dataset in dataset_list:
+                    if session.get(RaceResult, (dataset["race_id"], dataset["horse_number"])) is not None:
+                        continue
+
                     race_result = RaceResult(**dataset)
-                    session.merge(race_result)
+                    session.add(race_result)
                 session.commit()
+
+            except IntegrityError as ex:
+                session.rollback()
+
+                orig = getattr(ex, "orig", None)
+                if orig is not None:
+                    args = getattr(orig, "args", ())
+                    if len(args) >= 1 and args[0] == 1062:
+                        msg = args[1] if len(args) >= 2 else str(orig)
+                        self.logger.info("Duplicate ignored in race_result: %s", msg)
+                        return
+                raise ex
+
             except Exception as ex:
                 session.rollback()
                 raise ex
@@ -246,24 +358,53 @@ class SkylarkCrud:
                 print(ex)
         return None
 
-    def upsert_payoffs(self, dataset_list: list) -> None:
+    def insert_payoffs(self, dataset_list: list) -> None:
         with self.session() as session:
             try:
                 for dataset in dataset_list:
+                    if session.get(Payoff, (dataset["race_id"],dataset["ticket_type"], dataset["horse_numbers"])) is not None:
+                        continue
+
                     payoff = Payoff(**dataset)
-                    session.merge(payoff)
+                    session.add(payoff)
                 session.commit()
+
+            except IntegrityError as ex:
+                session.rollback()
+
+                orig = getattr(ex, "orig", None)
+                if orig is not None:
+                    args = getattr(orig, "args", ())
+                    if len(args) >= 1 and args[0] == 1062:
+                        msg = args[1] if len(args) >= 2 else str(orig)
+                        self.logger.info("Duplicate ignored in payoff: %s", msg)
+                        return
+                raise ex
+
             except Exception as ex:
                 session.rollback()
                 raise ex
 
-    def insert_features(self, dataset_list: list) -> None:
+    def upsert_features(self, dataset_list: list) -> None:
         with self.session() as session:
             try:
                 for dataset in dataset_list:
                     feature = Feature(**dataset)
                     session.merge(feature)
                 session.commit()
+
+            except IntegrityError as ex:
+                session.rollback()
+
+                orig = getattr(ex, "orig", None)
+                if orig is not None:
+                    args = getattr(orig, "args", ())
+                    if len(args) >= 1 and args[0] == 1062:
+                        msg = args[1] if len(args) >= 2 else str(orig)
+                        self.logger.info("Duplicate ignored in feature: %s", msg)
+                        return
+                raise ex
+
             except Exception as ex:
                 session.rollback()
                 raise ex

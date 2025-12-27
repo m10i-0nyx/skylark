@@ -1,6 +1,3 @@
-#!/usr/bin/env python3.13
-# -*- coding: utf-8 -*-
-
 #
 # Copyright (c) MINETA "m10i" Hiroki <h-mineta@0nyx.net>
 # This software is released under the MIT License.
@@ -14,13 +11,14 @@ import multiprocessing
 
 from dotenv import load_dotenv
 from tqdm import tqdm
-from skylark import crud, feature, scraper_db
+from skylark import crud, feature, scraper
 
 load_dotenv()
 
 parser = argparse.ArgumentParser(
     description='This script is a program that netkeiba.com scraping.')
 
+# temp directory
 parser.add_argument('--temp',
                     action='store',
                     nargs='?',
@@ -31,6 +29,7 @@ parser.add_argument('--temp',
                     help='temp directory(default: ./temp/)',
                     metavar=None)
 
+# race list file
 parser.add_argument('--race-list-file',
                     action='store',
                     nargs='?',
@@ -41,6 +40,7 @@ parser.add_argument('--race-list-file',
                     help='race list file(default: race_list.txt)',
                     metavar=None)
 
+# period of months
 parser.add_argument('--period-of-months',
                     action='store',
                     nargs='?',
@@ -51,36 +51,43 @@ parser.add_argument('--period-of-months',
                     help='period of months(default: 12)',
                     metavar=None)
 
+# rebuild all tables
 parser.add_argument('--rebuild-all-tables',
                     action='store_true',
                     default=False,
                     help='Rebuild all tables(default: False)',)
 
+# rebuild feature table
 parser.add_argument('-Rf', '--rebuild-feature',
                     action='store_true',
                     default=False,
                     help='Rebuild feature table(default: False)',)
 
+# update race list
 parser.add_argument('-U', '--update-race-list',
                     action='store_true',
                     default=False,
                     help='Update race list(default: False)',)
 
+# scraping mode
 parser.add_argument('-S', '--scraping',
                     action='store_true',
                     default=False,
                     help='scraping mode(default: False)',)
 
+# feature mode
 parser.add_argument('-F', '--feature',
                     action='store_true',
                     default=False,
                     help='feature mode(default: False)',)
 
+# debug mode
 parser.add_argument('--debug',
                     action='store_true',
                     default=False,
                     help='Debug mode(default: False)',)
 
+# race IDs
 parser.add_argument('race_id',
                     action='store',
                     nargs='*',
@@ -143,14 +150,14 @@ def main(args: argparse.Namespace, logger: logging.Logger, sqlalchemy_db_url: st
         db_crud.create_tables()
 
         if args.update_race_list == True:
-            instance = scraper_db.SkylarkScraperDb(sqlalchemy_db_url, args = args, logger = logger)
+            instance = scraper.SkylarkScraperDb(sqlalchemy_db_url, args = args, logger = logger)
             if args.update_race_list == True:
                 logger.info("make race URL list")
                 instance.make_race_url_list(period = args.period_of_months)
                 instance.export_race_url_list()
 
         if args.scraping == True:
-            instance = scraper_db.SkylarkScraperDb(sqlalchemy_db_url, args = args, logger = logger)
+            instance = scraper.SkylarkScraperDb(sqlalchemy_db_url, args = args, logger = logger)
             if len(args.race_id) > 0:
                 instance.set_race_url_list(args.race_id)
             else:
